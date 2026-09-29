@@ -49,12 +49,6 @@ details{margin-top:32px;color:var(--muted);font-size:14px}
 <main>
   <h1>My Trakt watchlist, best rated first</h1>
 
-  <form id="cfg">
-    <label>Trakt username<input id="user" required autocomplete="off" autocapitalize="none"></label>
-    <label>Trakt client ID<input id="cid" required autocomplete="off" autocapitalize="none"></label>
-    <button type="submit">Load watchlist</button>
-  </form>
-
   <div class="controls">
     <label>Sort by
       <select id="sort">
@@ -71,21 +65,14 @@ details{margin-top:32px;color:var(--muted);font-size:14px}
     </div>
   </div>
 
-  <p id="status" role="status" aria-live="polite">Enter your username and client ID to load your watchlist.</p>
+  <p id="status" role="status" aria-live="polite">Loading your watchlist…</p>
   <ol id="list"></ol>
-
-  <details>
-    <summary>Setup notes</summary>
-    <p>Create an app at trakt.tv/oauth/applications and paste its client ID above. Your watchlist must be public (Trakt settings, Privacy). Your username and client ID are saved only in this browser.</p>
-  </details>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
-const store = {
-  get(k){ try { return localStorage.getItem(k) || ''; } catch { return ''; } },
-  set(k,v){ try { localStorage.setItem(k,v); } catch {} }
-};
+const USER = 'stopherjones';
+const CLIENT_ID = '_jT0SgitsYU1WunKtcaVBuP9rKwi37LMo4yUOTv8eRQ';
 let rows = [], filter = 'all';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -100,14 +87,11 @@ async function api(path, key){
   return r.json();
 }
 
-async function load(e){
-  if (e) e.preventDefault();
-  const user = $('#user').value.trim(), key = $('#cid').value.trim();
-  if (!user || !key) return;
-  store.set('trakt_user', user); store.set('trakt_cid', key);
+async function load(){
+  const key = CLIENT_ID;
   setStatus('Loading…');
   try {
-    const u = encodeURIComponent(user);
+    const u = encodeURIComponent(USER);
     const [wl, rt] = await Promise.all([
       api(`/users/${u}/watchlist?extended=full`, key),
       api(`/users/${u}/ratings`, key).catch(() => [])
@@ -150,7 +134,6 @@ function render(){
     </a></li>`).join('');
 }
 
-$('#cfg').addEventListener('submit', load);
 $('#sort').addEventListener('change', render);
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
   filter = b.dataset.f;
@@ -158,9 +141,7 @@ document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click'
   render();
 }));
 
-$('#user').value = store.get('trakt_user');
-$('#cid').value = store.get('trakt_cid');
-if ($('#user').value && $('#cid').value) load();
+load();
 </script>
 </body>
 </html>
