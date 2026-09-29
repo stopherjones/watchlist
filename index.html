@@ -33,7 +33,8 @@ button{cursor:pointer;background:var(--ink);color:var(--paper);border-color:var(
 #status{color:var(--muted);min-height:1.5em;margin:0 0 8px}
 #status.err{color:var(--signal)}
 ol{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
-li a{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}
+li{border-bottom:1px solid var(--line)}
+li a{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;padding:12px 4px;color:inherit;text-decoration:none}
 li a:hover .title{text-decoration:underline}
 .score{font-size:32px;font-weight:700;letter-spacing:-.03em;color:var(--signal);font-variant-numeric:tabular-nums}
 .score.none{color:var(--muted);font-weight:400}
@@ -41,8 +42,10 @@ li a:hover .title{text-decoration:underline}
 .meta{display:block;font-size:14px;color:var(--muted)}
 .mine{font-size:14px;color:var(--muted);text-align:right}
 .mine b{color:var(--ink)}
-details{margin-top:32px;color:var(--muted);font-size:14px}
-@media (max-width:560px){form{grid-template-columns:1fr}.mine{display:none}li a{grid-template-columns:56px 1fr}}
+li details{padding:0 4px 12px 80px;font-size:14px;color:var(--muted)}
+li summary{cursor:pointer;width:max-content}
+li details p{margin:8px 0 0;max-width:60ch}
+@media (max-width:560px){form{grid-template-columns:1fr}.mine{display:none}li a{grid-template-columns:56px 1fr}li details{padding-left:72px}}
 </style>
 </head>
 <body>
@@ -104,14 +107,50 @@ async function load(){
         type: w.type, title: o.title, year: o.year || 0,
         rating: o.rating || 0, votes: o.votes || 0,
         mine: mine.get(w.type + o.ids.trakt) || 0,
+        id: o.ids.trakt, key: w.type + o.ids.trakt,
+        network: o.network || '', overview: o.overview || '', latest: '',
         url: `https://trakt.tv/${w.type}s/${o.ids.slug || o.ids.trakt}`
       };
     });
     render();
+    enrich();
   } catch (err) {
     rows = []; $('#list').innerHTML = '';
     setStatus(err.message, true);
   }
+}
+
+const DAY = 864e5;
+function cached(k){ try { const v = JSON.parse(localStorage.getItem(k)); return v && Date.now() - v.t < DAY ? v.d : null; } catch { return null; } }
+function cache(k, d){ try { localStorage.setItem(k, JSON.stringify({t: Date.now(), d})); } catch {} }
+
+async function latestSeason(r){
+  const ck = 'seasons:' + r.id;
+  let d = cached(ck);
+  if (!d){
+    const seasons = (await api(`/shows/${r.id}/seasons?extended=full`, CLIENT_ID)).filter(x => x.number > 0);
+    const last = seasons.length ? seasons.reduce((a, b) => b.number > a.number ? b : a) : null;
+    d = last ? {n: last.number, eps: last.episode_count || last.aired_episodes || 0} : {n: 0, eps: 0};
+    cache(ck, d);
+  }
+  return d;
+}
+
+async function enrich(){
+  const shows = rows.filter(r => r.type === 'show');
+  let i = 0;
+  const worker = async () => {
+    while (i < shows.length){
+      const r = shows[i++];
+      try {
+        const d = await latestSeason(r);
+        r.latest = d.n ? 'Series ' + d.n + (d.eps ? ', ' + d.eps + ' episodes' : '') : '';
+      } catch { r.latest = ''; }
+      const el = document.querySelector(`[data-k="${r.key}"]`);
+      if (el) el.textContent = r.latest;
+    }
+  };
+  await Promise.all(Array.from({length: 6}, worker));
 }
 
 function setStatus(t, isErr){ const s = $('#status'); s.textContent = t; s.className = isErr ? 'err' : ''; }
@@ -129,9 +168,11 @@ function render(){
     <li><a href="${esc(r.url)}" target="_blank" rel="noopener">
       <span class="score${r.rating ? '' : ' none'}">${r.rating ? r.rating.toFixed(1) : '–'}</span>
       <span><span class="title">${esc(r.title)}</span>
-        <span class="meta">${r.year || 'Year unknown'}, ${r.type === 'movie' ? 'movie' : 'show'}${r.votes ? ', ' + r.votes.toLocaleString() + ' votes' : ''}</span></span>
+        <span class="meta">${r.year || 'Year unknown'}, ${r.type === 'movie' ? 'movie' : 'show'}${r.network ? ', ' + esc(r.network) : ''}${r.votes ? ', ' + r.votes.toLocaleString() + ' votes' : ''}</span>
+        ${r.type === 'show' ? `<span class="meta" data-k="${r.key}">${esc(r.latest)}</span>` : ''}</span>
       <span class="mine">${r.mine ? 'You rated <b>' + r.mine + '</b>' : ''}</span>
-    </a></li>`).join('');
+    </a>
+    ${r.overview ? `<details><summary>Summary</summary><p>${esc(r.overview)}</p></details>` : ''}</li>`).join('');
 }
 
 $('#sort').addEventListener('change', render);
