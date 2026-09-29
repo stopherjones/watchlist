@@ -40,12 +40,12 @@ li a:hover .title{text-decoration:underline}
 .score.none{color:var(--muted);font-weight:400}
 .title{font-weight:600}
 .meta{display:block;font-size:14px;color:var(--muted)}
-.mine{font-size:14px;color:var(--muted);text-align:right}
-.mine b{color:var(--ink)}
+.meta b{color:var(--ink)}
+.logo{height:28px;width:72px;object-fit:contain;object-position:right center}
 li details{padding:0 4px 12px 80px;font-size:14px;color:var(--muted)}
 li summary{cursor:pointer;width:max-content}
 li details p{margin:8px 0 0;max-width:60ch}
-@media (max-width:560px){form{grid-template-columns:1fr}.mine{display:none}li a{grid-template-columns:56px 1fr}li details{padding-left:72px}}
+@media (max-width:560px){form{grid-template-columns:1fr}li a{grid-template-columns:56px 1fr auto}.logo{width:56px}li details{padding-left:72px}}
 </style>
 </head>
 <body>
@@ -120,6 +120,13 @@ async function load(){
   }
 }
 
+const slug = n => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+function logoFallback(img){
+  if (img.dataset.tried) { img.remove(); return; }
+  img.dataset.tried = '1';
+  img.src = img.src.replace(/\.png$/, '.svg');
+}
+
 const DAY = 864e5;
 function cached(k){ try { const v = JSON.parse(localStorage.getItem(k)); return v && Date.now() - v.t < DAY ? v.d : null; } catch { return null; } }
 function cache(k, d){ try { localStorage.setItem(k, JSON.stringify({t: Date.now(), d})); } catch {} }
@@ -169,8 +176,9 @@ function render(){
       <span class="score${r.rating ? '' : ' none'}">${r.rating ? r.rating.toFixed(1) : '–'}</span>
       <span><span class="title">${esc(r.title)}</span>
         <span class="meta">${r.year || 'Year unknown'}, ${r.type === 'movie' ? 'movie' : 'show'}${r.network ? ', ' + esc(r.network) : ''}${r.votes ? ', ' + r.votes.toLocaleString() + ' votes' : ''}</span>
-        ${r.type === 'show' ? `<span class="meta" data-k="${r.key}">${esc(r.latest)}</span>` : ''}</span>
-      <span class="mine">${r.mine ? 'You rated <b>' + r.mine + '</b>' : ''}</span>
+        ${r.type === 'show' ? `<span class="meta" data-k="${r.key}">${esc(r.latest)}</span>` : ''}
+        ${r.mine ? `<span class="meta">You rated <b>${r.mine}</b></span>` : ''}</span>
+      ${r.network ? `<img class="logo" src="logos/${slug(r.network)}.png" alt="${esc(r.network)}" loading="lazy" onerror="logoFallback(this)">` : ''}
     </a>
     ${r.overview ? `<details><summary>Summary</summary><p>${esc(r.overview)}</p></details>` : ''}</li>`).join('');
 }
