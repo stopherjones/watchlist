@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watchlist by rating</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f2f5fa; --ink:#16213a; --muted:#5d6a86; --line:#d3dbe9; --card:#fff; --signal:#d7263d;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--paper:#10182b;--ink:#e8edf7;--muted:#93a0bd;--line:#26314d;--card:#17213a;--signal:#ff5c70}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.5 "Familjen Grotesk",system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:clamp(28px,6vw,40px);line-height:1.1;margin:0 0 20px;letter-spacing:-.02em}
+form{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:16px}
+label{display:grid;gap:4px;font-size:14px;color:var(--muted)}
+input,select,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-height:40px}
+button{cursor:pointer;background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:600;align-self:end}
+:focus-visible{outline:3px solid var(--signal);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 12px;align-items:end}
+.seg{display:flex}
+.seg button{background:var(--card);color:var(--ink);border-color:var(--line);border-radius:0;font-weight:400}
+.seg button:first-child{border-radius:6px 0 0 6px}
+.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+#status{color:var(--muted);min-height:1.5em;margin:0 0 8px}
+#status.err{color:var(--signal)}
+ol{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+li a{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}
+li a:hover .title{text-decoration:underline}
+.score{font-size:32px;font-weight:700;letter-spacing:-.03em;color:var(--signal);font-variant-numeric:tabular-nums}
+.score.none{color:var(--muted);font-weight:400}
+.title{font-weight:600}
+.meta{display:block;font-size:14px;color:var(--muted)}
+.mine{font-size:14px;color:var(--muted);text-align:right}
+.mine b{color:var(--ink)}
+details{margin-top:32px;color:var(--muted);font-size:14px}
+@media (max-width:560px){form{grid-template-columns:1fr}.mine{display:none}li a{grid-template-columns:56px 1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>My Trakt watchlist, best rated first</h1>
+
+  <form id="cfg">
+    <label>Trakt username<input id="user" required autocomplete="off" autocapitalize="none"></label>
+    <label>Trakt client ID<input id="cid" required autocomplete="off" autocapitalize="none"></label>
+    <button type="submit">Load watchlist</button>
+  </form>
+
+  <div class="controls">
+    <label>Sort by
+      <select id="sort">
+        <option value="rating">Trakt rating</option>
+        <option value="mine">My rating</option>
+        <option value="year">Year, newest</option>
+        <option value="title">Title</option>
+      </select>
+    </label>
+    <div class="seg" role="group" aria-label="Filter by type">
+      <button type="button" data-f="all" aria-pressed="true">All</button>
+      <button type="button" data-f="movie" aria-pressed="false">Movies</button>
+      <button type="button" data-f="show" aria-pressed="false">Shows</button>
+    </div>
+  </div>
+
+  <p id="status" role="status" aria-live="polite">Enter your username and client ID to load your watchlist.</p>
+  <ol id="list"></ol>
+
+  <details>
+    <summary>Setup notes</summary>
+    <p>Create an app at trakt.tv/oauth/applications and paste its client ID above. Your watchlist must be public (Trakt settings, Privacy). Your username and client ID are saved only in this browser.</p>
+  </details>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch {} }
+};
+let rows = [], filter = 'all';
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, key){
+  const r = await fetch('https://api.trakt.tv' + path, {
+    headers: {'Content-Type':'application/json','trakt-api-version':'2','trakt-api-key':key}
+  });
+  if (r.status === 404) throw new Error('User not found. Check the username.');
+  if (r.status === 401 || r.status === 403) throw new Error('Trakt refused the request. Check the client ID, and make sure your watchlist is public.');
+  if (!r.ok) throw new Error('Trakt returned an error (' + r.status + '). Try again shortly.');
+  return r.json();
+}
+
+async function load(e){
+  if (e) e.preventDefault();
+  const user = $('#user').value.trim(), key = $('#cid').value.trim();
+  if (!user || !key) return;
+  store.set('trakt_user', user); store.set('trakt_cid', key);
+  setStatus('Loading…');
+  try {
+    const u = encodeURIComponent(user);
+    const [wl, rt] = await Promise.all([
+      api(`/users/${u}/watchlist?extended=full`, key),
+      api(`/users/${u}/ratings`, key).catch(() => [])
+    ]);
+    const mine = new Map();
+    rt.forEach(r => { const o = r[r.type]; if (o) mine.set(r.type + o.ids.trakt, r.rating); });
+    rows = wl.filter(w => w.type === 'movie' || w.type === 'show').map(w => {
+      const o = w[w.type];
+      return {
+        type: w.type, title: o.title, year: o.year || 0,
+        rating: o.rating || 0, votes: o.votes || 0,
+        mine: mine.get(w.type + o.ids.trakt) || 0,
+        url: `https://trakt.tv/${w.type}s/${o.ids.slug || o.ids.trakt}`
+      };
+    });
+    render();
+  } catch (err) {
+    rows = []; $('#list').innerHTML = '';
+    setStatus(err.message, true);
+  }
+}
+
+function setStatus(t, isErr){ const s = $('#status'); s.textContent = t; s.className = isErr ? 'err' : ''; }
+
+function render(){
+  const by = $('#sort').value;
+  const list = rows.filter(r => filter === 'all' || r.type === filter);
+  list.sort((a,b) =>
+    by === 'title' ? a.title.localeCompare(b.title) :
+    by === 'year' ? b.year - a.year :
+    (b[by] - a[by]) || b.rating - a.rating || a.title.localeCompare(b.title)
+  );
+  setStatus(list.length + (list.length === 1 ? ' title' : ' titles') + ' on your watchlist');
+  $('#list').innerHTML = list.map(r => `
+    <li><a href="${esc(r.url)}" target="_blank" rel="noopener">
+      <span class="score${r.rating ? '' : ' none'}">${r.rating ? r.rating.toFixed(1) : '–'}</span>
+      <span><span class="title">${esc(r.title)}</span>
+        <span class="meta">${r.year || 'Year unknown'}, ${r.type === 'movie' ? 'movie' : 'show'}${r.votes ? ', ' + r.votes.toLocaleString() + ' votes' : ''}</span></span>
+      <span class="mine">${r.mine ? 'You rated <b>' + r.mine + '</b>' : ''}</span>
+    </a></li>`).join('');
+}
+
+$('#cfg').addEventListener('submit', load);
+$('#sort').addEventListener('change', render);
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  filter = b.dataset.f;
+  document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  render();
+}));
+
+$('#user').value = store.get('trakt_user');
+$('#cid').value = store.get('trakt_cid');
+if ($('#user').value && $('#cid').value) load();
+</script>
+</body>
+</html>
